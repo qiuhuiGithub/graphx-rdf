@@ -1,6 +1,8 @@
 import org.apache.spark.SparkConf
 import org.apache.spark.SparkContext
 import org.apache.spark.graphx._
+import org.apache.jena.vocabulary.{RDF, RDFS}
+import org.apache.spark.graphx.PartitionStrategy.RandomVertexCut
 
 import scala.util.Random
 
@@ -12,14 +14,95 @@ object rdfreader {
 
   val sc = new SparkContext(new SparkConf().setMaster("local").setAppName("rdfreader"))
 
+  def merge_graphs(graph1: Graph[String, String], graph2: Graph[String, String]): Graph[String, String] = {
+    Graph(graph1.vertices.union(graph2.vertices),
+          graph1.edges.union(graph2.edges)
+        ).partitionBy(RandomVertexCut).
+          groupEdges( (attr1, attr2) => attr1 + attr2 )
+  }
+
+  def sendTypeMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
+    if (ec.attr == "<" + RDF.`type`.getURI + ">") {
+      ec.sendToSrc(ec.dstAttr._2.getOrElse("superclass", Set.empty))
+    }
+  }
+
+  def sendSubClassOfMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
+    if (ec.attr == "<" + RDFS.subClassOf.getURI + ">") {
+      ec.sendToSrc(ec.dstAttr._2.getOrElse("superclass", Set.empty) + ec.dstId)
+    }
+  }
+
+  def mergeTypeMsg(a: Set[VertexId], b: Set[VertexId]): Set[VertexId] = {
+    a ++ b
+  }
+
+  def mergeSubClassOfMsg(a: Set[VertexId], b: Set[VertexId]): Set[VertexId] = {
+    a ++ b
+  }
+
+  def graphWithSubClassOfSet(g: Graph[String, String]): Graph[(String, Map[String, Set[VertexId]]), String] = {
+    val verts = g.vertices.map(x => (x._1, (x._2, Map("superclass" -> Set.empty): Map[String, Set[VertexId]])))
+    Graph(verts, g.edges)
+  }
+
+  def updateMapWithSuperclasses(map: Map[String, Set[VertexId]], set: Set[VertexId]): Map[String, Set[VertexId]] = {
+    val s2 = map.getOrElse("superclass", Set.empty) ++ set
+    map + ("superclass" -> s2)
+  }
+
+  def aggregateTypeMsgs(g: Graph[(String, Map[String, Set[VertexId]]), String]):Graph[(String, Map[String, Set[VertexId]]), String] = {
+
+    val verts = g.aggregateMessages(sendTypeMsg, mergeTypeMsg)
+        .filter(x => x._2.nonEmpty)
+      //.flatMap(x => (x._1, x._2.flatten)
+      .foreach(println)
+
+    // TODO use the result of aggregate type messages to add new edges
+
+    g
+  }
+
+  def propagateSubClassOfMsgs(g: Graph[(String, Map[String, Set[VertexId]]), String]): Graph[(String, Map[String, Set[VertexId]]), String] = {
+
+    val verts = g.aggregateMessages(sendSubClassOfMsg, mergeSubClassOfMsg)
+      .rightOuterJoin(g.vertices)
+      .map(x => (x._1, (x._2._2._1, updateMapWithSuperclasses(x._2._2._2, x._2._1.getOrElse(Set.empty)))))
+      .collect
+
+    val g2 = Graph(sc.makeRDD(verts), g.edges)
+
+    val not_done = g2.vertices.join(g.vertices)
+        .map(x => x._2._1._2.get("superclass") != x._2._2._2.get("superclass"))
+      .reduce((a:Boolean, b:Boolean) => a || b)
+
+    if(not_done) {
+      propagateSubClassOfMsgs(g2)
+    } else {
+      g
+    }
+  }
+
+  def reason(g: Graph[String, String]): Graph[String, String] = {
+    val g2 = graphWithSubClassOfSet(g)
+    val g3 = propagateSubClassOfMsgs(g2)
+    val g4 = aggregateTypeMsgs(g3)
+    // TODO remove Map, return graph
+    g
+  }
+
   def main(args: Array[String]) {
 
-    val input = "data/prov-example.nt"
-    val rdf = readNTriples(sc, input)
+    val ontology = "data/ex.nt"
+    val ontology_rdf = readNTriples(sc, ontology)
 
-    rdf.triplets
-      .collect()
-      .foreach(println)
+    val data = "data/test.nt"
+    val data_rdf = readNTriples(sc, data)
+
+    val rdf = merge_graphs(ontology_rdf, data_rdf)
+
+    val inferred_rdf = reason(rdf)
+    inferred_rdf.triplets.collect.foreach(t => println(t.srcAttr, t.attr, t.dstAttr))
 
     sc.stop
   }
