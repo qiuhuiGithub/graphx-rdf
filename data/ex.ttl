@@ -1,0 +1,35 @@
+@prefix ex: <http://www.example.org/Example#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+<http://www.example.org/Example> a owl:Ontology .
+
+ex:Foo a owl:Class ;
+    rdfs:isDefinedBy <http://www.example.org/Example> .
+
+ex:Baz a owl:Class ;
+    rdfs:isDefinedBy <http://www.example.org/Example> .
+
+ex:Bar a owl:Class ;
+    rdfs:subClassOf ex:Baz ;
+    rdfs:isDefinedBy <http://www.example.org/Example> .
+
+ex:Foobar a owl:Class ;
+    rdfs:subClassOf ex:Foo, ex:Bar ;
+    rdfs:isDefinedBy <http://www.example.org/Example> .
+
+ex:Qux a owl:Class ;
+    rdfs:isDefinedBy <http://www.example.org/Example> .
+
+ex:p1 a owl:ObjectProperty ;
+    rdfs:isDefinedBy <http://www.example.org/Example> .
+
+ex:p2 a owl:ObjectProperty ;
+    rdfs:subPropertyOf ex:p1 ;
+    rdfs:isDefinedBy <http://www.example.org/Example> .
+
+ex:p3 a owl:ObjectProperty ;
+    rdfs:domain ex:Foobar ;
+    rdfs:range ex:Qux ;
+    rdfs:isDefinedBy <http://www.example.org/Example> .

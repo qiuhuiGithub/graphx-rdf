@@ -1,0 +1,12 @@
+@prefix ex: <http://www.example.org/Example#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix data: <http://www.example.org/data/> .
+
+data:a a ex:Foobar .
+
+data:b a ex:Bar ;
+    ex:p2 data:c .
+
+data:d ex:p3 data:e .
