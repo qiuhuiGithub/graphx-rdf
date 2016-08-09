@@ -51,16 +51,13 @@ object rdfreader {
     map + ("superclass" -> s2)
   }
 
-  def aggregateTypeMsgs(g: Graph[(String, Map[String, Set[VertexId]]), String]):Graph[(String, Map[String, Set[VertexId]]), String] = {
-
-    val verts = g.aggregateMessages(sendTypeMsg, mergeTypeMsg)
-        .filter(x => x._2.nonEmpty)
-      //.flatMap(x => (x._1, x._2.flatten)
-      .foreach(println)
-
-    // TODO use the result of aggregate type messages to add new edges
-
-    g
+  def inferTypeStatements(g: Graph[(String, Map[String, Set[VertexId]]), String]): Array[Edge[String]] = {
+    val rdf_type_str = "<"+RDF.`type`.getURI+">"
+    g.aggregateMessages(sendTypeMsg, mergeTypeMsg)
+      .filter(x => x._2.nonEmpty)
+      .flatMap(x => x._2.map(y => (x._1, y)))
+      .map(e => Edge(e._1, e._2, rdf_type_str))
+      .collect
   }
 
   def propagateSubClassOfMsgs(g: Graph[(String, Map[String, Set[VertexId]]), String]): Graph[(String, Map[String, Set[VertexId]]), String] = {
@@ -86,9 +83,8 @@ object rdfreader {
   def reason(g: Graph[String, String]): Graph[String, String] = {
     val g2 = graphWithSubClassOfSet(g)
     val g3 = propagateSubClassOfMsgs(g2)
-    val g4 = aggregateTypeMsgs(g3)
-    // TODO remove Map, return graph
-    g
+    val new_edges = inferTypeStatements(g3)
+    Graph(g.vertices, g.edges.union(sc.makeRDD(new_edges)))
   }
 
   def main(args: Array[String]) {
