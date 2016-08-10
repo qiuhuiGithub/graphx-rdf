@@ -67,10 +67,38 @@ object rdfreader {
     map + ("domain" -> s2)
   }
 
+  def updateMapWithRangeSet(map: Map[String, Set[VertexId]], set: Set[VertexId]): Map[String, Set[VertexId]] = {
+    val s2 = map.getOrElse("range", Set.empty) ++ set
+    map + ("range" -> s2)
+  }
+
   def sendDomainOfPropertyMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
     if (ec.attr == "uses" && ec.dstAttr != null) {
       ec.sendToSrc(ec.dstAttr._2.getOrElse("domain", Set.empty))
     }
+  }
+
+  def sendRangeOfPropertyMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
+    if(ec.attr == "referenced_by" && ec.dstAttr != null) {
+      ec.sendToSrc(ec.dstAttr._2.getOrElse("range", Set.empty))
+    }
+  }
+
+  def inferTypeViaRange(g: Graph[(String, Map[String, Set[VertexId]]), String]): RDD[Edge[String]] = {
+
+    // generate updated graph with "referenced by" edges
+    val referenced_by_edges = g.edges.map(e => Edge(e.dstId, uriHash(e.attr), "referenced_by")).cache()
+    val g2 = Graph(g.vertices, g.edges.union(referenced_by_edges))
+
+    // update property vertices with "range" sets
+    val v2 = g2.aggregateMessages(sendRangeMsg, mergeVertexSet)
+      .rightOuterJoin(g2.vertices)
+      .filter( v => v._2._2 != null)
+      .map(x => (x._1, (x._2._2._1, updateMapWithRangeSet(x._2._2._2, x._2._1.getOrElse(Set.empty)))))
+      .cache()
+
+    // generate RDD of new rdf:type edges based on rdfs:range of referenced_by properties
+    inferTypeStatements(Graph(v2, g2.edges), sendRangeOfPropertyMsg, mergeVertexSet)
   }
 
   def inferTypeViaDomain(g: Graph[(String, Map[String, Set[VertexId]]), String]): RDD[Edge[String]] = {
@@ -86,6 +114,7 @@ object rdfreader {
       .map(x => (x._1, (x._2._2._1, updateMapWithDomainSet(x._2._2._2, x._2._1.getOrElse(Set.empty)))))
       .cache()
 
+    // generate RDD of new rdf:type edges based on rdfs:domain of used properties
     inferTypeStatements(Graph(v2, g2.edges), sendDomainOfPropertyMsg, mergeVertexSet)
   }
 
@@ -131,10 +160,11 @@ object rdfreader {
     // generate RDD of type statements inferred via rdfs:domain
     val new_type_edges_via_domain = inferTypeViaDomain(g2)
 
-    // TODO generate RDD of type statements inferred via rdfs:range
+    // generate RDD of type statements inferred via rdfs:range
+    val new_type_edges_via_range = inferTypeViaRange(g2)
 
-    // generate new graph with type statements inferred via rdfs:domain
-    val g3 = Graph(g2.vertices, g.edges.union(new_type_edges_via_domain))
+    // generate new graph with type statements inferred via rdfs:domain & rdfs:range
+    val g3 = Graph(g2.vertices, g.edges.union(new_type_edges_via_domain).union(new_type_edges_via_range))
 
     // generate list of type statements inferred via rdfs:subClassOf
     val new_type_edges_via_subclass = inferTypeViaSubClassOf(g3)
