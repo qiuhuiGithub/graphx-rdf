@@ -24,6 +24,7 @@ ex:Qux a owl:Class ;
 
 ex:p1 a owl:ObjectProperty ;
     rdfs:subPropertyOf ex:p0 ;
+    rdfs:range ex:Qux ;
     rdfs:isDefinedBy <http://www.example.org/Example> .
 
 ex:p2 a owl:ObjectProperty ;
@@ -36,4 +37,5 @@ ex:p3 a owl:ObjectProperty ;
     rdfs:isDefinedBy <http://www.example.org/Example> .
 
 ex:p0 a owl:ObjectProperty ;
+    rdfs:domain ex:Foo ;
     rdfs:isDefinedBy <http://www.example.org/Example> .
