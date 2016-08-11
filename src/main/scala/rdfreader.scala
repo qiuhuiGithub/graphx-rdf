@@ -17,6 +17,13 @@ object rdfreader {
 
   val rdf_type_str = "<" + RDF.`type`.getURI + ">"
 
+  val subClassOf = "subClassOf"
+  val subPropertyOf = "subPropertyOf"
+  val domain = "domain"
+  val range = "range"
+  val uses = "uses"
+  val referencedBy = "referencedBy"
+
   def merge_graphs(graph1: Graph[String, String], graph2: Graph[String, String]): Graph[String, String] = {
     Graph(graph1.vertices.union(graph2.vertices),
       graph1.edges.union(graph2.edges)
@@ -26,29 +33,45 @@ object rdfreader {
 
   def sendTypeMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
     if (ec.attr == "<" + RDF.`type`.getURI + ">") {
-      ec.sendToSrc(ec.dstAttr._2.getOrElse("superclass", Set.empty))
+      ec.sendToSrc(ec.dstAttr._2.getOrElse(subClassOf, Set.empty))
+    }
+  }
+
+  def sendPropertyMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Map[VertexId, Set[VertexId]]]): Unit = {
+    if(ec.dstAttr != null && ec.dstAttr._2.get(subPropertyOf).isDefined) {
+      ec.sendToSrc(Map(ec.dstId -> ec.dstAttr._2.getOrElse(subPropertyOf, Set.empty)))
     }
   }
 
   def sendSubClassOfMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
     if (ec.attr == "<" + RDFS.subClassOf.getURI + ">") {
-      ec.sendToSrc(ec.dstAttr._2.getOrElse("superclass", Set.empty) + ec.dstId)
+      ec.sendToSrc(ec.dstAttr._2.getOrElse(subClassOf, Set.empty) + ec.dstId)
+    }
+  }
+
+  def sendSubPropertyOfMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
+    if (ec.attr == "<" + RDFS.subPropertyOf.getURI + ">") {
+      ec.sendToSrc(ec.dstAttr._2.getOrElse(subPropertyOf, Set.empty) + ec.dstId)
     }
   }
 
   def sendDomainMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
     if (ec.attr == "<" + RDFS.domain.getURI + ">") {
-      ec.sendToSrc(ec.dstAttr._2.getOrElse("domain", Set.empty) + ec.dstId)
+      ec.sendToSrc(ec.dstAttr._2.getOrElse(domain, Set.empty) + ec.dstId)
     }
   }
 
   def sendRangeMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
     if (ec.attr == "<" + RDFS.range.getURI + ">") {
-      ec.sendToSrc(ec.dstAttr._2.getOrElse("range", Set.empty) + ec.dstId)
+      ec.sendToSrc(ec.dstAttr._2.getOrElse(range, Set.empty) + ec.dstId)
     }
   }
 
   def mergeVertexSet(a: Set[VertexId], b: Set[VertexId]): Set[VertexId] = {
+    a ++ b
+  }
+
+  def mergeVertexMaps(a: Map[VertexId, Set[VertexId]], b: Map[VertexId, Set[VertexId]]): Map[VertexId, Set[VertexId]] = {
     a ++ b
   }
 
@@ -57,44 +80,34 @@ object rdfreader {
     Graph(verts, g.edges)
   }
 
-  def updateMapWithSuperclasses(map: Map[String, Set[VertexId]], set: Set[VertexId]): Map[String, Set[VertexId]] = {
-    val s2 = map.getOrElse("superclass", Set.empty) ++ set
-    map + ("superclass" -> s2)
-  }
-
-  def updateMapWithDomainSet(map: Map[String, Set[VertexId]], set: Set[VertexId]): Map[String, Set[VertexId]] = {
-    val s2 = map.getOrElse("domain", Set.empty) ++ set
-    map + ("domain" -> s2)
-  }
-
-  def updateMapWithRangeSet(map: Map[String, Set[VertexId]], set: Set[VertexId]): Map[String, Set[VertexId]] = {
-    val s2 = map.getOrElse("range", Set.empty) ++ set
-    map + ("range" -> s2)
+  def updateMapWithSet(map: Map[String, Set[VertexId]], key: String, set: Set[VertexId]): Map[String, Set[VertexId]] = {
+    val s2 = map.getOrElse(key, Set.empty) ++ set
+    map + (key -> s2)
   }
 
   def sendDomainOfPropertyMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
-    if (ec.attr == "uses" && ec.dstAttr != null) {
-      ec.sendToSrc(ec.dstAttr._2.getOrElse("domain", Set.empty))
+    if (ec.attr == uses && ec.dstAttr != null) {
+      ec.sendToSrc(ec.dstAttr._2.getOrElse(domain, Set.empty))
     }
   }
 
   def sendRangeOfPropertyMsg(ec: EdgeContext[(String, Map[String, Set[VertexId]]), String, Set[VertexId]]): Unit = {
-    if(ec.attr == "referenced_by" && ec.dstAttr != null) {
-      ec.sendToSrc(ec.dstAttr._2.getOrElse("range", Set.empty))
+    if(ec.attr == referencedBy && ec.dstAttr != null) {
+      ec.sendToSrc(ec.dstAttr._2.getOrElse(range, Set.empty))
     }
   }
 
   def inferTypeViaRange(g: Graph[(String, Map[String, Set[VertexId]]), String]): RDD[Edge[String]] = {
 
     // generate updated graph with "referenced by" edges
-    val referenced_by_edges = g.edges.map(e => Edge(e.dstId, uriHash(e.attr), "referenced_by")).cache()
+    val referenced_by_edges = g.edges.map(e => Edge(e.dstId, uriHash(e.attr), referencedBy)).cache()
     val g2 = Graph(g.vertices, g.edges.union(referenced_by_edges))
 
     // update property vertices with "range" sets
     val v2 = g2.aggregateMessages(sendRangeMsg, mergeVertexSet)
       .rightOuterJoin(g2.vertices)
       .filter( v => v._2._2 != null)
-      .map(x => (x._1, (x._2._2._1, updateMapWithRangeSet(x._2._2._2, x._2._1.getOrElse(Set.empty)))))
+      .map(x => (x._1, (x._2._2._1, updateMapWithSet(x._2._2._2, range, x._2._1.getOrElse(Set.empty)))))
       .cache()
 
     // generate RDD of new rdf:type edges based on rdfs:range of referenced_by properties
@@ -104,14 +117,14 @@ object rdfreader {
   def inferTypeViaDomain(g: Graph[(String, Map[String, Set[VertexId]]), String]): RDD[Edge[String]] = {
 
     // generate updated graph with "uses" edges
-    val uses_edges = g.edges.map(e => Edge(e.srcId, uriHash(e.attr), "uses")).cache()
+    val uses_edges = g.edges.map(e => Edge(e.srcId, uriHash(e.attr), uses)).cache()
     val g2 = Graph(g.vertices, g.edges.union(uses_edges))
 
     // update property vertices with "domain" sets
     val v2 = g2.aggregateMessages(sendDomainMsg, mergeVertexSet)
       .rightOuterJoin(g2.vertices)
       .filter( v => v._2._2 != null)
-      .map(x => (x._1, (x._2._2._1, updateMapWithDomainSet(x._2._2._2, x._2._1.getOrElse(Set.empty)))))
+      .map(x => (x._1, (x._2._2._1, updateMapWithSet(x._2._2._2, domain, x._2._1.getOrElse(Set.empty)))))
       .cache()
 
     // generate RDD of new rdf:type edges based on rdfs:domain of used properties
@@ -134,17 +147,65 @@ object rdfreader {
     inferTypeStatements(g2, sendTypeMsg, mergeVertexSet)
   }
 
-  def propagateSubClassOfMsgs(g: Graph[(String, Map[String, Set[VertexId]]), String]): Graph[(String, Map[String, Set[VertexId]]), String] = {
+  def inferEdgesViaSubPropertyOf(g: Graph[(String, Map[String, Set[VertexId]]), String]): RDD[Edge[String]] = {
+    // generate updated graph with "uses" edges
+    val uses_edges = g.edges.map(e => Edge(e.srcId, uriHash(e.attr), uses)).cache()
 
-    val verts = g.aggregateMessages(sendSubClassOfMsg, mergeVertexSet)
+    val g2 = Graph(g.vertices, g.edges.union(uses_edges))
+
+    val g3 = propagateSubPropertyOfMsgs(g2)
+
+    val foo = g3.vertices
+      .filter(v => v._2 != null && v._2._2.isDefinedAt(subPropertyOf) && v._2._2(subPropertyOf).nonEmpty)
+      .flatMap(v => v._2._2(subPropertyOf).map(w => (v._1, w)))
+      .collect()
+
+    val bar = g.vertices
+      .flatMap(v => foo.map(f => (f, v)))
+      .filter(x => x._1._2 == x._2._1)
+      .map(x => (x._1._1, x._1._2, x._2._2._1))
+      .collect()
+
+    g.edges
+      .flatMap(e => bar.map(f => (f, e)))
+      .filter(x => uriHash(x._2.attr) == x._1._1)
+      .map(x => Edge(x._2.srcId, x._2.dstId, x._1._3))
+      .cache()
+  }
+
+  def propagateSubPropertyOfMsgs(g: Graph[(String, Map[String, Set[VertexId]]), String]): Graph[(String, Map[String, Set[VertexId]]), String] = {
+
+    val verts = g.aggregateMessages(sendSubPropertyOfMsg, mergeVertexSet)
       .rightOuterJoin(g.vertices)
-      .map(x => (x._1, (x._2._2._1, updateMapWithSuperclasses(x._2._2._2, x._2._1.getOrElse(Set.empty)))))
+      .filter(x => x._2._2 != null)
+      .map(x => (x._1, (x._2._2._1, updateMapWithSet(x._2._2._2, subPropertyOf,x._2._1.getOrElse(Set.empty)))))
       .cache
 
     val g2 = Graph(verts, g.edges)
 
     val not_done = g2.vertices.join(g.vertices)
-      .map(x => x._2._1._2.get("superclass") != x._2._2._2.get("superclass"))
+      .filter(x => x._2._1 != null && x._2._2 != null)
+      .map(x => x._2._1._2.get(subPropertyOf) != x._2._2._2.get(subPropertyOf))
+      .reduce((a: Boolean, b: Boolean) => a || b)
+
+    if (not_done) {
+      propagateSubPropertyOfMsgs(g2)
+    } else {
+      g
+    }
+  }
+
+  def propagateSubClassOfMsgs(g: Graph[(String, Map[String, Set[VertexId]]), String]): Graph[(String, Map[String, Set[VertexId]]), String] = {
+
+    val verts = g.aggregateMessages(sendSubClassOfMsg, mergeVertexSet)
+      .rightOuterJoin(g.vertices)
+      .map(x => (x._1, (x._2._2._1, updateMapWithSet(x._2._2._2, subClassOf, x._2._1.getOrElse(Set.empty)))))
+      .cache
+
+    val g2 = Graph(verts, g.edges)
+
+    val not_done = g2.vertices.join(g.vertices)
+      .map(x => x._2._1._2.get(subClassOf) != x._2._2._2.get(subClassOf))
       .reduce((a: Boolean, b: Boolean) => a || b)
 
     if (not_done) {
@@ -157,19 +218,24 @@ object rdfreader {
   def reason(g: Graph[String, String]): Graph[String, String] = {
     val g2 = graphWithVertexMap(g)
 
+    // generate RDD of edges inferred via rdfs:subPropertyOf
+    val new_edges_via_sub_property_of = inferEdgesViaSubPropertyOf(g2)
+
+    val g3 = Graph(g2.vertices, g2.edges.union(new_edges_via_sub_property_of))
+
     // generate RDD of type statements inferred via rdfs:domain
-    val new_type_edges_via_domain = inferTypeViaDomain(g2)
+    val new_type_edges_via_domain = inferTypeViaDomain(g3)
 
     // generate RDD of type statements inferred via rdfs:range
-    val new_type_edges_via_range = inferTypeViaRange(g2)
+    val new_type_edges_via_range = inferTypeViaRange(g3)
 
     // generate new graph with type statements inferred via rdfs:domain & rdfs:range
-    val g3 = Graph(g2.vertices, g.edges.union(new_type_edges_via_domain).union(new_type_edges_via_range))
+    val g4 = Graph(g3.vertices, g3.edges.union(new_type_edges_via_domain).union(new_type_edges_via_range))
 
     // generate list of type statements inferred via rdfs:subClassOf
     val new_type_edges_via_subclass = inferTypeViaSubClassOf(g3)
 
-    Graph(g.vertices, g3.edges.union(new_type_edges_via_subclass))
+    Graph(g.vertices, g4.edges.union(new_type_edges_via_subclass))
   }
 
   def main(args: Array[String]) {
